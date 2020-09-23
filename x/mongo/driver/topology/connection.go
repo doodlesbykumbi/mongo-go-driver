@@ -23,6 +23,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/description"
 	"go.mongodb.org/mongo-driver/x/bsonx/bsoncore"
 	"go.mongodb.org/mongo-driver/x/mongo/driver"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/ocsp"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/wiremessage"
 )
@@ -60,6 +61,57 @@ type connection struct {
 	poolID       uint64
 	generation   uint64
 	expireReason string
+}
+
+// NewConnection handles the creation of a connection. It does not connect the connection.
+func NewConnection(addr address.Address, opts ...ConnectionOption) (*connection, error) {
+	return newConnection(addr, opts...)
+}
+
+func (c *connection) Connect(ctx context.Context) {
+	c.connect(ctx)
+}
+
+func (c *connection) Wait() error {
+	return c.wait()
+}
+
+func (c *connection) StealConn() net.Conn {
+	conn := c.nc
+	c.nc = nil
+	return conn
+}
+
+
+func WithConnStringForConn(
+	fn func(connString connstring.ConnString) connstring.ConnString,
+) ConnectionOption {
+	return func(cc *connectionConfig) error {
+		dummyConfig, err := newConfig(
+			WithConnString(func(connString connstring.ConnString) connstring.ConnString {
+				return fn(connString)
+			},
+			))
+		if err != nil {
+			return err
+		}
+
+		dummyServerConfig, err := newServerConfig(
+			dummyConfig.serverOpts...
+		)
+		if err != nil {
+			return err
+		}
+
+		for _, opt := range dummyServerConfig.connectionOpts {
+			err := opt(cc)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
 }
 
 // newConnection handles the creation of a connection. It does not connect the connection.
